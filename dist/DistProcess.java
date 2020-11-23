@@ -48,7 +48,9 @@ public class DistProcess implements Watcher
 		{
 			runForMaster();	// See if you can become the master (i.e, no other master exists)
 			isMaster=true;
-			getTasks(); // Install monitoring on any new tasks that will be created.
+			DistMaster m = new DistMaster("master");
+			m.init(zk);
+			//getTasks(); // Install monitoring on any new tasks that will be created.
 									// TODO monitor for worker tasks?
 		}catch(NodeExistsException nee)
 		{
@@ -57,10 +59,9 @@ public class DistProcess implements Watcher
 			isMaster=false;
 			zk.create("/dist30/workers/worker-", pinfo.getBytes(), Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL,
 				(rc, path, ctx, name) -> {
-					System.out.println("A task node " + name + " has been created");
+					System.out.println("A worker node " + name + " has been created");
 					DistWorker worker = new DistWorker(name);
-					worker.setZooKeeper(zk);
-					worker.init();
+					worker.init(zk);
 				}, null);
 		}
 

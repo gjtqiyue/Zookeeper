@@ -89,6 +89,7 @@ public class DistMaster implements Watcher {
                 logger.info("DISTMASTER: Add new Worker, " + workerFullName);
                 workers.put(workerFullName, "");
                 zk.addWatch(workerFullName, this, AddWatchMode.PERSISTENT, (rc, path, ctx) -> {}, null);
+                tryAssignPendingTask(workerFullName);
             }
         }
     }
@@ -126,8 +127,10 @@ public class DistMaster implements Watcher {
 
     private void assignWork(String worker, String task)  {
         // assign task to the worker
+        System.out.println("assign work and create node " + worker);
         zk.create(worker + "/task", task.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE,
-                CreateMode.EPHEMERAL, (i, s, o, s1) -> {
+                CreateMode.EPHEMERAL, (rc, path, ctx, name, stat) -> {
+                    logger.info("DISTMASTER: task has been created");
                 }, null);
     }
 }

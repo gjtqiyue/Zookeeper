@@ -12,24 +12,21 @@ public class DistWorker implements Watcher {
     private final String workersPath = "/dist30/workers";
     private final String tasksPath = "/dist30/tasks";
     private final String masterPath = "/dist30/master";
-    private final Logger logger = Logger.getLogger(DistMaster.class.getName());
+    private final Logger logger = Logger.getLogger(DistWorker.class.getName());
     ZooKeeper zk;
     String task;
     String pinfo;
 
     public DistWorker(String pInfo) {
-        pinfo = pinfo;
+        this.pinfo = pInfo;
     }
 
-    public void setZooKeeper(ZooKeeper zk) {
-        this.zk = zk;
-    }
-
-    public void init() {
+    public void init(ZooKeeper zk) {
         // add a watch to master node
         // whenever a process creates a worker node it will notify master
         // if the master's state changes this should be notified
-        zk.addWatch(pinfo, this, AddWatchMode.PERSISTENT, (rc, path, ctx) -> {}, null);
+        this.zk = zk;
+        zk.getChildren(pinfo, this, (rc, path, ctx, children) -> {}, null);
         logger.info("DISTWORKER: add watch to worker node " + pinfo);
     }
 
@@ -86,7 +83,10 @@ public class DistWorker implements Watcher {
             // Store it inside the result node.
             logger.info("DISWORKER: " + pinfo + " storing results......");
             zk.create(fullpath + "/result", taskSerial, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT, (rc, path, ctx, name)->{
-                try { deleteTask(); }
+                try { 
+                    deleteTask(); 
+                    zk.getChildren(pinfo, this, (rc, path, ctx, children) -> {}, null);
+                }
                 catch (KeeperException e) { e.printStackTrace(); }
                 catch (InterruptedException e) { e.printStackTrace(); }
             }, null);

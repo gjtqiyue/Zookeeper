@@ -8,12 +8,13 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Consumer;
+import java.util.logging.Logger;
 
 public class DistMaster implements Watcher {
     private final String workersPath = "/dist30/workers";
     private final String tasksPath = "/dist30/tasks";
-
-    Map<String, Boolean> workers;
+    private final Logger logger = Logger.getLogger(DistMaster.class.getName());
+    Map<String, String> workers;
     Queue<String> pendingTasks;
     Set<String> registeredTasks;
     ZooKeeper zk;
@@ -28,24 +29,31 @@ public class DistMaster implements Watcher {
 
     public void init(ZooKeeper zk) {
         this.zk = zk;
+        zk.getChildren(workersPath, this, (rc, path, ctx, list) -> threadedRun(this::checkToAddNewWorker, list), null);
         zk.getChildren(tasksPath, this, (i, s, o, list) -> threadedRun(this::tryAssignTask, list), null);
+        logger.info("checking worker");
     }
 
     @Override
     public void process(WatchedEvent watchedEvent) {
-        System.out.println("DISTMASTER : Event received : " + watchedEvent);
+        logger.info("DISTMASTER : Event received : " + watchedEvent);
         if (watchedEvent.getType() == Event.EventType.NodeChildrenChanged) {
             if (watchedEvent.getPath().equals(workersPath)) {
-                System.out.println("DISTMASTER: Worker change detected");
+                logger.info("DISTMASTER: Worker change detected");
                 zk.getChildren(workersPath, this, (rc, path, ctx, list) -> threadedRun(this::checkToAddNewWorker, list), null);
             } else if (watchedEvent.getPath().equals(tasksPath)) {
-                System.out.println("DISTMASTER: task change detected");
+                logger.info("DISTMASTER: task change detected");
                 zk.getChildren(tasksPath, this, (i, s, o, list) -> threadedRun(this::tryAssignTask, list), null);
             } else if (watchedEvent.getPath().matches(workersPath + "/worker-.+")) {
-                zk.getChildren(tasksPath, this, (i, s, o, list) -> {
+                zk.getChildren(watchedEvent.getPath(), this, (i, s, o, list) -> {
                     if (list.size() == 0) {
                         // this means the worker is done
-                        threadedRun(this::tryAssignPendingTask, watchedEvent.getPath());
+                        // remove the original task
+                        String worker = watchedEvent.getPath();
+                        String finishedTask = workers.get(worker);
+                        registeredTasks.remove(finishedTask);
+                        logger.info("task: " + finishedTask + " is finished");
+                        threadedRun(this::tryAssignPendingTask, worker);
                     }
                 }, null);
             }
@@ -64,12 +72,13 @@ public class DistMaster implements Watcher {
     private void tryAssignPendingTask(String worker) {
         String task = pendingTasks.poll();
         if (task != null) {
-            System.out.println("DISTMASTER: Add pending task " + task + " to " + worker);
+            logger.info("DISTMASTER: Add pending task " + task + " to " + worker);
             assignWork(worker, task);
+            workers.put(worker, task);
         } else {
             // no pending task, worker becomes idle
-            System.out.println("DISTMASTER: No pending task, " + worker + " becomes idle");
-            workers.put(worker, true);
+            logger.info("DISTMASTER: No pending task, " + worker + " becomes idle");
+            workers.put(worker, "");
         }
     }
 
@@ -77,7 +86,8 @@ public class DistMaster implements Watcher {
         for (String child : children) {
             String workerFullName = workersPath + "/" + child;
             if (!workers.containsKey(workerFullName)) {
-                workers.put(workerFullName, true);
+                logger.info("DISTMASTER: Add new Worker, " + workerFullName);
+                workers.put(workerFullName, "");
                 zk.addWatch(workerFullName, this, AddWatchMode.PERSISTENT, (rc, path, ctx) -> {}, null);
             }
         }
@@ -94,18 +104,20 @@ public class DistMaster implements Watcher {
                 // add the task to registered list
                 registeredTasks.add(taskFullName);
                 boolean isProcessed = false;
-                for (Map.Entry<String, Boolean> worker : workers.entrySet()) {
-                    if (worker.getValue()) {
+                for (Map.Entry<String, String> worker : workers.entrySet()) {
+                    if (worker.getValue().equals("")) {
                         // worker is idle, can be used to assign tasks
-                        worker.setValue(false);
+                        worker.setValue(taskFullName);
                         assignWork(worker.getKey(), taskFullName);
                         isProcessed = true;
+                        logger.info("Assign task: " + taskFullName + " to worker " + worker.getKey());
                         break;
                     }
                 }
 
                 // no idle worker, add it to waiting queue
                 if (!isProcessed) {
+                    logger.info("No available worker, put the task " + taskFullName + " to pending queue");
                     pendingTasks.offer(taskFullName);
                 }
             }
@@ -113,20 +125,9 @@ public class DistMaster implements Watcher {
     }
 
     private void assignWork(String worker, String task)  {
-        try {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            ObjectOutputStream oos = new ObjectOutputStream(bos);
-            oos.writeObject(task);
-            oos.flush();
-            // assign task to the worker
-            zk.create(worker + "/task", bos.toByteArray(), ZooDefs.Ids.OPEN_ACL_UNSAFE,
-                    CreateMode.EPHEMERAL, (i, s, o, s1) -> {
-                        zk.addWatch(s1,  (e) -> {
-                            if (e.getType() == Event.EventType.NodeDeleted) removeTask(e.getPath());
-                        }, AddWatchMode.PERSISTENT, (i1, s2, o1) -> {},null);
-                    }, null);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        // assign task to the worker
+        zk.create(worker + "/task", task.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE,
+                CreateMode.EPHEMERAL, (i, s, o, s1) -> {
+                }, null);
     }
 }

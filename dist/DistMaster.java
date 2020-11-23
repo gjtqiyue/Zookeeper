@@ -4,6 +4,7 @@ import org.apache.zookeeper.server.watch.WatcherMode;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.ObjectOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -44,10 +45,17 @@ public class DistMaster implements Watcher {
             } else if (watchedEvent.getPath().equals(tasksPath)) {
                 logger.info("DISTMASTER: task change detected");
                 zk.getChildren(tasksPath, this, (i, s, o, list) -> threadedRun(this::tryAssignTask, list), null);
-            } else if (watchedEvent.getPath().matches(workersPath + "/worker-.+")) {
-                zk.getChildren(watchedEvent.getPath(), this, (i, s, o, list) -> {
-                    if (list.size() == 0) {
-                        // this means the worker is done
+            }
+        } else if (watchedEvent.getType() == Event.EventType.NodeDeleted) {
+            if (watchedEvent.getPath().matches(workersPath + "/worker-.+")) {
+                workers.remove(watchedEvent.getPath());
+            }
+        } else if (watchedEvent.getType() == Event.EventType.NodeDataChanged) {
+            if (watchedEvent.getPath().matches(workersPath + "/worker-.+")) {
+                zk.getData(watchedEvent.getPath(), this, (rc, path, ctx, bytes, stat) -> {
+                    String data = new String(bytes, StandardCharsets.UTF_8);
+                    if (data.equals("")) {
+                        // this means the worker is done, 0 children
                         // remove the original task
                         String worker = watchedEvent.getPath();
                         String finishedTask = workers.get(worker);
@@ -56,10 +64,6 @@ public class DistMaster implements Watcher {
                         threadedRun(this::tryAssignPendingTask, worker);
                     }
                 }, null);
-            }
-        } else if (watchedEvent.getType() == Event.EventType.NodeDeleted) {
-            if (watchedEvent.getPath().matches(workersPath + "/worker-.+")) {
-                workers.remove(watchedEvent.getPath());
             }
         }
     }
@@ -89,6 +93,7 @@ public class DistMaster implements Watcher {
                 logger.info("DISTMASTER: Add new Worker, " + workerFullName);
                 workers.put(workerFullName, "");
                 zk.addWatch(workerFullName, this, AddWatchMode.PERSISTENT, (rc, path, ctx) -> {}, null);
+                tryAssignPendingTask(workerFullName);
             }
         }
     }
@@ -126,8 +131,11 @@ public class DistMaster implements Watcher {
 
     private void assignWork(String worker, String task)  {
         // assign task to the worker
-        zk.create(worker + "/task", task.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE,
-                CreateMode.EPHEMERAL, (i, s, o, s1) -> {
+        System.out.println("assign work and create node " + worker + "/task");
+        zk.setData(worker, task.getBytes(), -1,
+                (rc, path, ctx, data) -> {
+                    System.out.println(KeeperException.Code.get(rc));
+                    logger.info("DISTMASTER: task "  + task  + " has been created");
                 }, null);
     }
 }

@@ -33,6 +33,10 @@ public class DistProcess implements Watcher
 	String zkServer, pinfo;
 	boolean isMaster=false;
 
+	static {
+		System.setProperty("java.util.logging.SimpleFormatter.format", "[%1$tF %1$tT] [%4$-7s] %5$s %n");
+	}
+
 	DistProcess(String zkhost)
 	{
 		zkServer=zkhost;
@@ -47,8 +51,10 @@ public class DistProcess implements Watcher
 		try
 		{
 			runForMaster();	// See if you can become the master (i.e, no other master exists)
+			DistMaster master = new DistMaster(pinfo);
+			master.init(zk);
 			isMaster=true;
-			getTasks(); // Install monitoring on any new tasks that will be created.
+//			getTasks(); // Install monitoring on any new tasks that will be created.
 									// TODO monitor for worker tasks?
 		}catch(NodeExistsException nee)
 		{ isMaster=false; } // TODO: What else will you need if this was a worker process?
@@ -150,14 +156,15 @@ public class DistProcess implements Watcher
 		}
 	}
 
-	public static void main(String args[]) throws Exception
-	{
+	public static void main(String args[]) throws Exception {
 		//Create a new process
 		//Read the ZooKeeper ensemble information from the environment variable.
 		DistProcess dt = new DistProcess(System.getenv("ZKSERVER"));
 		dt.startProcess();
 
 		//Replace this with an approach that will make sure that the process is up and running forever.
-		Thread.sleep(100000);
+		synchronized (dt) {
+			dt.wait();
+		}
 	}
 }

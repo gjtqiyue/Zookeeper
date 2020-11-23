@@ -47,7 +47,7 @@ public class DistMaster implements Watcher {
             } else if (watchedEvent.getPath().matches(workersPath + "/worker-.+")) {
                 zk.getChildren(watchedEvent.getPath(), this, (i, s, o, list) -> {
                     if (list.size() == 0) {
-                        // this means the worker is done
+                        // this means the worker is done, 0 children
                         // remove the original task
                         String worker = watchedEvent.getPath();
                         String finishedTask = workers.get(worker);

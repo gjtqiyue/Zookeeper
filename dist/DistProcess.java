@@ -13,7 +13,7 @@ import org.apache.zookeeper.ZooDefs.Ids;
 import org.apache.zookeeper.KeeperException.*;
 import org.apache.zookeeper.data.*;
 import org.apache.zookeeper.KeeperException.Code;
-
+import java.util.logging.Logger;
 // TODO
 // Replace XX with your group number.
 // You may have to add other interfaces such as for threading, etc., as needed.
@@ -51,7 +51,18 @@ public class DistProcess implements Watcher
 			getTasks(); // Install monitoring on any new tasks that will be created.
 									// TODO monitor for worker tasks?
 		}catch(NodeExistsException nee)
-		{ isMaster=false; } // TODO: What else will you need if this was a worker process?
+		{
+			// TODO: What else will you need if this was a worker process?
+			// create a new sequential node for worker
+			isMaster=false;
+			zk.create("/dist30/workers/worker-", pinfo.getBytes(), Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL,
+				(rc, path, ctx, name) -> {
+					System.out.println("A task node " + name + " has been created");
+					DistWorker worker = new DistWorker(name);
+					worker.setZooKeeper(zk);
+					worker.init();
+				}, null);
+		}
 
 		System.out.println("DISTAPP : Role : " + " I will be functioning as " +(isMaster?"master":"worker"));
 	}
@@ -77,7 +88,7 @@ public class DistProcess implements Watcher
 		//!! IMPORTANT !!
 		// Do not perform any time consuming/waiting steps here
 		//	including in other functions called from here.
-		// 	Your will be essentially holding up ZK client library 
+		// 	Your will be essentially holding up ZK client library
 		//	thread and you will not get other notifications.
 		//	Instead include another thread in your program logic that
 		//   does the time consuming "work" and notify that thread from here.
@@ -99,7 +110,7 @@ public class DistProcess implements Watcher
 		//!! IMPORTANT !!
 		// Do not perform any time consuming/waiting steps here
 		//	including in other functions called from here.
-		// 	Your will be essentially holding up ZK client library 
+		// 	Your will be essentially holding up ZK client library
 		//	thread and you will not get other notifications.
 		//	Instead include another thread in your program logic that
 		//   does the time consuming "work" and notify that thread from here.
@@ -131,7 +142,7 @@ public class DistProcess implements Watcher
 				//Execute the task.
 				//TODO: Again, time consuming stuff. Should be done by some other thread and not inside a callback!
 				dt.compute();
-				
+
 				// Serialize our Task object back to a byte array!
 				ByteArrayOutputStream bos = new ByteArrayOutputStream();
 				ObjectOutputStream oos = new ObjectOutputStream(bos);

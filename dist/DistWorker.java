@@ -84,7 +84,8 @@ public class DistWorker implements Watcher {
             // Store it inside the result node.
             logger.info("DISWORKER: " + pinfo + " storing results......");
             zk.create(taskSerial + "/result", result, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT, (rc, path, ctx, name)->{
-                try { 
+                try {
+                    logger.info(pinfo + " Storing results finished, idle...");
                     deleteTask();
                     zk.getData(pinfo, this, (rc1, path1, ctx1, data ,stat) -> {}, null);
                 }
